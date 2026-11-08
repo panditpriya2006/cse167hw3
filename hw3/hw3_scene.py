@@ -240,3 +240,133 @@ def upload_scene(filename, module, slang_device, use_bvh = False):
     }
 
     return bindings, scene, shapes
+
+def compose_transformations(transformations):
+    """
+        Given a list of transformations, compose them into a matrix.
+    """
+    F = np.eye(4, dtype=np.float32)
+
+    for transform in transformations:
+        if 'scale' in transform:
+            sx, sy, sz = transform['scale']
+            T = np.diag([sx, sy, sz, 1]).astype(np.float32)
+
+        elif 'translate' in transform:
+            tx, ty, tz = transform['translate']
+            T = np.eye(4, dtype=np.float32)
+            T[:3, 3] = [tx, ty, tz]
+
+        elif 'rotate_x' in transform:
+            angle = np.radians(transform['rotate_x'][0])
+            c, s = np.cos(angle), np.sin(angle)
+            T = np.array([
+                [1, 0, 0, 0],
+                [0, c, -s, 0],
+                [0, s, c, 0],
+                [0, 0, 0, 1]
+            ], dtype=np.float32)
+
+        elif 'rotate_y' in transform:
+            angle = np.radians(transform['rotate_y'][0])
+            c, s = np.cos(angle), np.sin(angle)
+            T = np.array([
+                [c, 0, s, 0],
+                [0, 1, 0, 0],
+                [-s, 0, c, 0],
+                [0, 0, 0, 1]
+            ], dtype=np.float32)
+
+        elif 'rotate_z' in transform:
+            angle = np.radians(transform['rotate_z'][0])
+            c, s = np.cos(angle), np.sin(angle)
+            T = np.array([
+                [c, -s, 0, 0],
+                [s, c, 0, 0],
+                [0, 0, 1, 0],
+                [0, 0, 0, 1]
+            ], dtype=np.float32)
+
+        elif 'lookat' in transform:
+            lookat = transform['lookat']
+            position = np.array(lookat['position'], dtype=np.float32)
+            target = np.array(lookat['target'], dtype=np.float32)
+            up = np.array(lookat['up'], dtype=np.float32)
+
+            forward = target - position
+            forward /= np.linalg.norm(forward)
+
+            right = np.cross(forward, up)
+            right /= np.linalg.norm(right)
+
+            up = np.cross(right, forward)
+
+            T = np.eye(4, dtype=np.float32)
+            T[:3, 0] = right
+            T[:3, 1] = up
+            T[:3, 2] = -forward
+            T[:3, 3] = position
+
+        else:
+            raise ValueError(f"Unknown transformation: {transform}")
+
+        F = T @ F
+
+    return F
+
+def interpolate_transformation(transform_keyframes, t):
+    # HW 2.4: implement this
+    # Find the two keyframes surrounding t and linearly
+    # interpolate the corresponding transformation parameters.
+    #
+    # Return a list of transformations in the same format
+    # as the "transform" field in the scene JSON.
+
+    if not transform_keyframes:
+        return []
+    
+    # If only 1 keyframe, return its transform
+    if len(transform_keyframes) == 1:
+        return transform_keyframes[0]["transform"]
+
+    # Clamp t to keyframe range [first.time, last.time]
+    t_clamped = min(max(t, transform_keyframes[0]["time"]), transform_keyframes[-1]["time"])
+
+    # Find interval [k0, k1] where transform_keyframes[i].time <= t_clamped <= transform_keyframes[i+1].time
+    idx = 0
+    for i in range(len(transform_keyframes) - 1):
+        if transform_keyframes[i]["time"] <= t_clamped <= transform_keyframes[i + 1]["time"]:
+            idx = i
+            break
+
+    k0 = transform_keyframes[idx]
+    k1 = transform_keyframes[idx + 1]
+
+    t0 = k0["time"]
+    t1 = k1["time"]
+
+    alpha = 0.0 if abs(t1 - t0) < 1e-7 else (t_clamped - t0) / (t1 - t0)
+
+    interp_transforms = []
+
+    # Both keyframes have the exact same number and sequence of transforms
+    for tf0, tf1 in zip(k0["transform"], k1["transform"]):
+        tf_type = list(tf0.keys())[0]
+        val0 = tf0[tf_type]
+        val1 = tf1[tf_type]
+
+        if isinstance(val0, dict):
+            # Nested dictionary (e.g. "lookat": {"position": ..., "target": ..., "up": ...})
+            interp_dict = {}
+            for k in val0:
+                p0 = np.array(val0[k], dtype=np.float32)
+                p1 = np.array(val1[k], dtype=np.float32)
+                interp_dict[k] = ((1.0 - alpha) * p0 + alpha * p1).tolist()
+            interp_transforms.append({tf_type: interp_dict})
+        else:
+            # List of parameters (e.g. translate, rotate_x, scale)
+            p0 = np.array(val0, dtype=np.float32)
+            p1 = np.array(val1, dtype=np.float32)
+            interp_transforms.append({tf_type: ((1.0 - alpha) * p0 + alpha * p1).tolist()})
+
+    return interp_transforms
