@@ -34,7 +34,7 @@ void compute_main(uint2 tid : SV_DispatchThreadID,
     int hit_index = -1;
 
     for (int i = 0; i < num_shapes; i++) {
-        Sphere sp = spheres[i];
+        Sphere sp = spheres[shapes[i].index];
         float3 oc = ray_origin - sp.center;
 
         float A = dot(ray_dir, ray_dir);
