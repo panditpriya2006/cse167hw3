@@ -5,7 +5,7 @@ __pycache__/
 output.png
 *.log
 
-outputs/
+//outputs/
 
 *.fls
 *.aux
